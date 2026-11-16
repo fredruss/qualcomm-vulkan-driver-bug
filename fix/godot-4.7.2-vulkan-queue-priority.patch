@@ -1,0 +1,95 @@
+diff --git a/core/config/project_settings.cpp b/core/config/project_settings.cpp
+index 0e078c3..e9b6281 100644
+--- a/core/config/project_settings.cpp
++++ b/core/config/project_settings.cpp
+@@ -1829,6 +1829,7 @@ ProjectSettings::ProjectSettings() {
+ 	GLOBAL_DEF_RST(PropertyInfo(Variant::BOOL, "rendering/rendering_device/pipeline_cache/enable"), true);
+ 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/rendering_device/pipeline_cache/save_chunk_size_mb", PROPERTY_HINT_RANGE, "0.000001,64.0,0.001,or_greater"), 3.0);
+ 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/rendering_device/vulkan/max_descriptors_per_pool", PROPERTY_HINT_RANGE, "1,256,1,or_greater"), 64);
++	GLOBAL_DEF_RST("rendering/rendering_device/vulkan/high_queue_priority", false);
+ 
+ 	GLOBAL_DEF_RST("rendering/rendering_device/d3d12/max_resource_descriptors", 65536);
+ 	custom_prop_info["rendering/rendering_device/d3d12/max_resource_descriptors"] = PropertyInfo(Variant::INT, "rendering/rendering_device/d3d12/max_resource_descriptors", PROPERTY_HINT_RANGE, "512,1000000");
+diff --git a/doc/classes/ProjectSettings.xml b/doc/classes/ProjectSettings.xml
+index 14e3133..e978457 100644
+--- a/doc/classes/ProjectSettings.xml
++++ b/doc/classes/ProjectSettings.xml
+@@ -3399,6 +3399,11 @@
+ 			[b]Note:[/b] Changes to this setting will only be applied on startup or when the swapchain is recreated (e.g. when setting the V-Sync mode).
+ 			[b]Note:[/b] Some platforms may restrict the actual value.
+ 		</member>
++		<member name="rendering/rendering_device/vulkan/high_queue_priority" type="bool" setter="" getter="" default="false">
++			If [code]true[/code], the Vulkan device queues are created with a high global priority, so the GPU runs the project's work ahead of other applications with the default priority. This is a workaround for some Android GPU drivers (for example, on the Adreno 730) that show one-frame rendering errors when the system compositor preempts the project's GPU work.
++			[b]Note:[/b] This only applies if the driver supports [code]VK_KHR_global_priority[/code] or [code]VK_EXT_global_priority[/code]. The driver may refuse the high priority, in which case the default priority is used.
++			[b]Note:[/b] Changing this property requires a restart to take effect.
++		</member>
+ 		<member name="rendering/rendering_device/vulkan/max_descriptors_per_pool" type="int" setter="" getter="" default="64">
+ 			The number of descriptors per pool. Godot's Vulkan backend uses linear pools for descriptors that will be created and destroyed within a single frame. Instead of destroying every single descriptor every frame, they all can be destroyed at once by resetting the pool they belong to.
+ 			A larger number is more efficient up to a limit, after that it will only waste RAM (maximum efficiency is achieved when there is no more than 1 pool per frame). A small number could end up with one pool per descriptor, which negatively impacts performance.
+diff --git a/drivers/vulkan/rendering_device_driver_vulkan.cpp b/drivers/vulkan/rendering_device_driver_vulkan.cpp
+index 4b1bd9f..2c2504d 100644
+--- a/drivers/vulkan/rendering_device_driver_vulkan.cpp
++++ b/drivers/vulkan/rendering_device_driver_vulkan.cpp
+@@ -617,6 +617,11 @@ Error RenderingDeviceDriverVulkan::_initialize_device_extensions() {
+ 
+ 	_register_requested_device_extension(VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME, false);
+ 
++	if (GLOBAL_GET("rendering/rendering_device/vulkan/high_queue_priority")) {
++		_register_requested_device_extension(VK_KHR_GLOBAL_PRIORITY_EXTENSION_NAME, false);
++		_register_requested_device_extension(VK_EXT_GLOBAL_PRIORITY_EXTENSION_NAME, false);
++	}
++
+ 	uint32_t device_extension_count = 0;
+ 	VkResult err = vkEnumerateDeviceExtensionProperties(physical_device, nullptr, &device_extension_count, nullptr);
+ 	ERR_FAIL_COND_V_MSG(err != VK_SUCCESS, ERR_CANT_CREATE, vformat("Couldn't get Vulkan device extension count (VkResult error %d).", err));
+@@ -672,6 +677,12 @@ Error RenderingDeviceDriverVulkan::_initialize_device_extensions() {
+ 		}
+ 	}
+ 
++	// VK_KHR_global_priority is the promoted VK_EXT_global_priority, only enable one of them.
++	if (enabled_device_extension_names.has(VK_KHR_GLOBAL_PRIORITY_EXTENSION_NAME)) {
++		enabled_device_extension_names.erase(VK_EXT_GLOBAL_PRIORITY_EXTENSION_NAME);
++		requested_device_extensions.erase(VK_EXT_GLOBAL_PRIORITY_EXTENSION_NAME);
++	}
++
+ 	// Now check our requested extensions.
+ 	for (KeyValue<CharString, bool> &requested_extension : requested_device_extensions) {
+ 		if (!enabled_device_extension_names.has(requested_extension.key)) {
+@@ -1496,8 +1507,35 @@ Error RenderingDeviceDriverVulkan::_initialize_device(const LocalVector<VkDevice
+ 		bool device_created = VulkanHooks::get_singleton()->create_vulkan_device(&create_info, &vk_device);
+ 		ERR_FAIL_COND_V_MSG(!device_created, ERR_CANT_CREATE, "Couldn't create a Vulkan device through the VulkanHooks singleton.");
+ 	} else {
+-		VkResult err = vkCreateDevice(physical_device, &create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_DEVICE), &vk_device);
+-		ERR_FAIL_COND_V_MSG(err != VK_SUCCESS, ERR_CANT_CREATE, vformat("Couldn't create Vulkan device (VkResult error %d).", err));
++		VkResult err = VK_ERROR_INITIALIZATION_FAILED;
++		if (enabled_device_extension_names.has(VK_KHR_GLOBAL_PRIORITY_EXTENSION_NAME) || enabled_device_extension_names.has(VK_EXT_GLOBAL_PRIORITY_EXTENSION_NAME)) {
++			// Requested by rendering/rendering_device/vulkan/high_queue_priority. The EXT structure has the same layout and structure type.
++			TightLocalVector<VkDeviceQueueGlobalPriorityCreateInfoKHR> queue_priority_info;
++			TightLocalVector<VkDeviceQueueCreateInfo> queue_create_info;
++			queue_priority_info.resize(p_queue_create_info.size());
++			queue_create_info.resize(p_queue_create_info.size());
++			for (uint32_t i = 0; i < p_queue_create_info.size(); i++) {
++				queue_priority_info[i] = {};
++				queue_priority_info[i].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_GLOBAL_PRIORITY_CREATE_INFO_KHR;
++				queue_priority_info[i].pNext = p_queue_create_info[i].pNext;
++				queue_priority_info[i].globalPriority = VK_QUEUE_GLOBAL_PRIORITY_HIGH_KHR;
++				queue_create_info[i] = p_queue_create_info[i];
++				queue_create_info[i].pNext = &queue_priority_info[i];
++			}
++			create_info.pQueueCreateInfos = queue_create_info.ptr();
++			err = vkCreateDevice(physical_device, &create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_DEVICE), &vk_device);
++			create_info.pQueueCreateInfos = p_queue_create_info.ptr();
++			if (err == VK_SUCCESS) {
++				print_verbose("Vulkan: Created the device queues with high global priority.");
++			} else {
++				// The driver may refuse the priority (usually VK_ERROR_NOT_PERMITTED_KHR), retry with the default one.
++				print_line(vformat("Vulkan: High queue global priority not available (VkResult %d), using the default priority.", err));
++			}
++		}
++		if (err != VK_SUCCESS) {
++			err = vkCreateDevice(physical_device, &create_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_DEVICE), &vk_device);
++			ERR_FAIL_COND_V_MSG(err != VK_SUCCESS, ERR_CANT_CREATE, vformat("Couldn't create Vulkan device (VkResult error %d).", err));
++		}
+ 	}
+ 
+ 	for (uint32_t i = 0; i < queue_families.size(); i++) {

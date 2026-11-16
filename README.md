@@ -52,6 +52,11 @@ The preset "Android Compatibility" is the same project on `gl_compatibility` (cu
 
 A recording turns on GPU composition, so the last row is an eye test only.
 
+## Workaround
+
+With the Vulkan queue global priority set to HIGH (engine patch), this project shows 0 faults. The compositor then
+misses deadlines under GPU composition. See `fix/README.md`.
+
 ## Count the faults
 
 `tools/` needs `adb`, `scrcpy`, `ffmpeg` and Python 3 with `numpy`.
