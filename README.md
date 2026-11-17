@@ -16,6 +16,11 @@ For one frame, then the picture is correct again:
 2. Parts of the picture are wrong: wrong sun shadows on the grass.
 3. One skinned mesh is drawn giant (stretched spikes across the screen).
 
+Recorded on the phone with this project, slowed to 5 fps. The fault is one frame in the middle of each loop.
+
+![Grass and ground missing for one frame](evidence/repro_grey_holes.gif)
+![One skinned mesh drawn giant for one frame](evidence/repro_giant_mesh.gif)
+
 Expected: no fault frames.
 
 ## Condition
