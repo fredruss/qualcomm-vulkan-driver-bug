@@ -1,5 +1,5 @@
 # tally.py SCAN_FILE: counts the fault frames in a scan_still.py output (static camera only).
-# small = 300 < n < 20000 (n < 600 is the noise class), giant = n >= 20000, in frames with still < 1.5.
+# small = 300 < n < 20000 (also listed: n > 600), giant = n >= 20000, in frames with still < 1.5.
 import sys
 still = small = real = giant = 0
 for line in open(sys.argv[1]):

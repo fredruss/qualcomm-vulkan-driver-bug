@@ -35,7 +35,9 @@ transform = Transform3D(1, 0, 0, 0, 0.9612617, 0.27563736, 0, -0.27563736, 0.961
 mesh = SubResource("ground_mesh")
 surface_material_override/0 = SubResource("ground_material")
 
-[node name="Counter" type="Label" parent="." unique_id=1859053114]
+[node name="HUD" type="CanvasLayer" parent="." unique_id=1371045529]
+
+[node name="Counter" type="Label" parent="HUD" unique_id=1859053114]
 offset_left = 16.0
 offset_top = 16.0
 offset_right = 416.0

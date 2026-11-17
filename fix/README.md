@@ -15,7 +15,7 @@ it is `true`, Godot creates the Vulkan device queues with global priority HIGH (
 | Patch, setting on | 0 of 2084 | 0 | 975 | 571 | 49 |
 
 The faults are gone. The cost: under GPU composition, the compositor misses deadlines, because the project now
-holds the GPU ahead of it. This project is a worst case (no frame cap, GPU busy 100 %). In a game with a 30 fps
+holds the GPU ahead of it. This project is a worst case (no fps cap, the GPU is the limit). In a game with a 30 fps
 cap, the same patch gave 0 faults in 5353 frames and no measured frame rate cost. Without GPU composition the
 compositor does not use the GPU, so there is no cost.
 

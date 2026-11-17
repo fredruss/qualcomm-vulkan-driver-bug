@@ -12,7 +12,7 @@ const CLEARING := Vector2(0, 3)
 var _wind := ShaderMaterial.new()
 
 @onready var _camera: Camera3D = $Camera
-@onready var _counter: Label = $Counter
+@onready var _counter: Label = $HUD/Counter
 
 
 func _ready() -> void:
@@ -31,6 +31,7 @@ func _process(_delta: float) -> void:
 
 
 ## The characters stand in an arc in front of the camera and face it; half idle, half walk on the spot.
+## The clips loop through their import settings.
 func _spawn_crowd() -> void:
 	var libraries := {
 		"general": _library("res://assets/animations/Rig_Medium_General.glb"),
@@ -57,8 +58,6 @@ func _library(path: String) -> AnimationLibrary:
 	var scene: Node = load(path).instantiate()
 	var library: AnimationLibrary = scene.get_node("AnimationPlayer").get_animation_library("")
 	scene.free()
-	for clip in library.get_animation_list():
-		library.get_animation(clip).loop_mode = Animation.LOOP_LINEAR
 	return library
 
 

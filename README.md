@@ -28,7 +28,7 @@ Android GPU composition (SurfaceFlinger draws with the GPU). Any of these turns 
 
 The rate grows with the GPU time per frame. The scene keeps the GPU busy: 12 animated skinned characters,
 6000 grass and 300 tree instances with vertex wind, a sun with shadows, and on mobile 3D scale 2.0, MSAA 2x and
-no frame rate cap.
+no fps cap. V-Sync stays on, but the app runs at about 71 fps on the 120 Hz screen: the GPU is the limit.
 
 ## Steps
 
