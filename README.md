@@ -1,6 +1,6 @@
 # Adreno 730: single-frame glitches with GPU composition (Godot 4.7.2, Vulkan)
 
-Minimal reproduction project for a Godot bug report.
+Minimal reproduction project for [godotengine/godot#125576](https://github.com/godotengine/godot/issues/125576).
 
 On an Adreno 730 phone, the Forward Mobile renderer (Vulkan) shows single-frame glitches whenever Android
 composites the screen on the GPU, for example with "Disable HW overlays" enabled or during a screen recording.
