@@ -1,29 +1,31 @@
-# Workaround: Vulkan queue global priority HIGH
+# Workaround: high Vulkan queue priority
 
-An engine patch for Godot 4.7.2. It is not a pull request: an AI agent wrote it. It is here for developers who
-ship on affected phones now.
+A Godot 4.7.2 patch for developers who ship on affected phones. It was written with an AI assistant, so it is not
+proposed as a PR.
 
-The patch adds the project setting `rendering/rendering_device/vulkan/high_queue_priority` (default `false`). When
-it is `true`, Godot creates the Vulkan device queues with global priority HIGH (`VK_KHR_global_priority`, else
-`VK_EXT_global_priority`). If the driver refuses, Godot uses the default priority and logs one line.
+It adds the project setting `rendering/rendering_device/vulkan/high_queue_priority` (default `false`). When
+enabled, Godot creates its Vulkan queues with global priority HIGH (`VK_KHR_global_priority` or
+`VK_EXT_global_priority`). If the driver refuses, Godot falls back to the default priority and logs it.
 
-## Result (this project, same phone, GPU composition on)
+## Result
 
-| Build | Hole frames | One-frame faults | Composed frames in 20 s | Missed compositor deadlines | App fps on screen |
-|---|---|---|---|---|---|
-| Stock | 158 of 6082 | 317 small, 232 giant | 1193 | 0 | 61 |
-| Patch, setting on | 0 of 2084 | 0 | 975 | 571 | 49 |
+This project, same phone, "Disable HW overlays" on:
 
-The faults are gone. The cost: under GPU composition, the compositor misses deadlines, because the project now
-holds the GPU ahead of it. This project is a worst case (no fps cap, the GPU is the limit). In a game with a 30 fps
-cap, the same patch gave 0 faults in 5353 frames and no measured frame rate cost. Without GPU composition the
-compositor does not use the GPU, so there is no cost.
+| Build | Glitch frames | App fps | Missed compositor frames (20 s) |
+|---|---|---|---|
+| Stock | 158 of 6082 with missing ground, 549 in total | 61 | 0 of 1193 |
+| Patched, setting on | 0 of 2084 | 49 | 571 of 975 |
 
-The test build was a .NET 4.7.2 template with this patch. It also held a second patch (CPU skinning) that was off.
+The glitches are gone, but with GPU composition the compositor now misses frames, because the app runs ahead of it
+on the GPU. This project is a worst case, with the GPU always busy. In my game, capped at 30 fps, the patch gave 0
+glitches in 5353 frames and no measurable cost. Without GPU composition, the compositor doesn't use the GPU and
+there is no cost.
+
+The tested template also contained a second patch (CPU skinning), disabled.
 
 ## Use
 
-1. Build the Android templates from `4.7.2-stable` with the patch:
+1. Build the Android export templates with the patch:
 
    ```sh
    git clone -b 4.7.2-stable https://github.com/godotengine/godot.git && cd godot
@@ -35,5 +37,5 @@ The test build was a .NET 4.7.2 template with this patch. It also held a second 
    ```
 
 2. In the export preset, set `custom_template/debug` and `custom_template/release` to the APKs in `bin/`.
-3. In `project.godot`, under `[rendering]`: `rendering_device/vulkan/high_queue_priority.android=true`.
-4. Check the log with `--verbose`: `Vulkan: Created the device queues with high global priority.`
+3. In `project.godot`, under `[rendering]`, add `rendering_device/vulkan/high_queue_priority.android=true`.
+4. Run with `--verbose` and check for `Vulkan: Created the device queues with high global priority.`

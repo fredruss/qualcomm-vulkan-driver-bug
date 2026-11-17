@@ -1,119 +1,71 @@
-# Adreno 730: one-frame render faults under GPU composition (Godot 4.7.2, Mobile renderer)
+# Adreno 730: single-frame glitches with GPU composition (Godot 4.7.2, Vulkan)
 
-A minimal project for a Godot issue. On a Qualcomm Adreno 730 phone, the Mobile renderer shows single-frame
-faults when Android composes the screen with the GPU. The Compatibility renderer does not.
+Minimal reproduction project for a Godot bug report.
 
-## Device
+On an Adreno 730 phone, the Forward Mobile renderer (Vulkan) shows single-frame glitches whenever Android
+composites the screen on the GPU, for example with "Disable HW overlays" enabled or during a screen recording.
+The same project on the Compatibility renderer (OpenGL ES 3.2) has no glitches.
 
-- Samsung Galaxy S22 Ultra (SM-S908E), Adreno 730, Qualcomm Vulkan driver 512.615.98, Android 16
-- Godot 4.7.2-stable (official editor and export templates), Mobile renderer
+![Ground and grass missing for one frame](evidence/repro_grey_holes.gif)
+![Skinned mesh drawn as giant spikes for one frame](evidence/repro_giant_mesh.gif)
 
-## What shows
+*Phone recordings slowed down to 5 fps. The glitch is the middle frame of each loop.*
 
-For one frame, then the picture is correct again:
+## Tested on
 
-1. Parts of the picture are absent: the grass and the ground are missing and the clear colour (grey) shows.
-2. Parts of the picture are wrong: wrong sun shadows on the grass.
-3. One skinned mesh is drawn giant (stretched spikes across the screen).
+- Samsung Galaxy S22 Ultra (SM-S908E), Adreno 730, Vulkan driver 512.615.98, Android 16
+- Godot 4.7.2-stable, official editor and export templates
 
-Recorded on the phone with this project, slowed to 5 fps. The fault is one frame in the middle of each loop.
+## Steps to reproduce
 
-![Grass and ground missing for one frame](evidence/repro_grey_holes.gif)
-![One skinned mesh drawn giant for one frame](evidence/repro_giant_mesh.gif)
+1. Open the project in Godot 4.7.2 and export the "Android Vulkan" preset.
+2. On the phone, enable Developer options > "Disable HW overlays" (it resets on reboot).
+3. Run the app for a minute. The camera is static and a frame counter is in the top-left corner.
 
-Expected: no fault frames.
+Expected: no glitches. Actual: frequent single-frame glitches of three kinds:
 
-## Condition
+- the ground and grass are missing and the clear colour shows through
+- wrong shadows on the grass
+- one skinned mesh is drawn as giant stretched spikes
 
-Android GPU composition (SurfaceFlinger draws with the GPU). Any of these turns it on:
-
-- Developer options > "Disable HW overlays" (it turns off again at each restart)
-- A screen recorder (the phone's own, or scrcpy)
-- An overlay window
-
-The rate grows with the GPU time per frame. The scene keeps the GPU busy: 12 animated skinned characters,
-6000 grass and 300 tree instances with vertex wind, a sun with shadows, and on mobile 3D scale 2.0, MSAA 2x and
-no fps cap. V-Sync stays on, but the app runs at about 71 fps on the 120 Hz screen: the GPU is the limit.
-
-## Steps
-
-1. Open the project in Godot 4.7.2 and export the preset "Android Vulkan" (debug).
-2. Install it on the phone and turn on "Disable HW overlays".
-3. Start the app and watch for 1 to 2 minutes. The camera holds still. The top-left counter shows the frame number.
-
-The preset "Android Compatibility" is the same project on `gl_compatibility` (custom feature `compat`), as a control.
+The "Android Compatibility" preset is the same project on OpenGL (`gl_compatibility`), as a control.
 
 ## Results
 
-90 s per run, no input, recorded with scrcpy (which also forces GPU composition). Project settings unless stated.
+90 s per run, recorded with scrcpy (which also forces GPU composition), no input:
 
-| Build | GPU composition | fps | Recorded frames | Hole frames (`holes.py`) | One-frame faults (`tally.py`) |
-|---|---|---|---|---|---|
-| Vulkan | on | 71 | 6082 | 158 (2.6 %) | 317 small, 232 giant |
-| Vulkan, 30 fps cap, no MSAA | on | 30 | 2691 | 0 | 1 small |
-| Vulkan, 30 fps cap | on | 30 | 2695 | 0 | 1 giant |
-| Compatibility | on | 40 | 3723 | 0 | 0 |
-| Vulkan | off | 71 | not recorded | no clear fault seen by eye | |
+| Build | fps | Frames | Frames with missing ground | Single-frame glitches (any kind) |
+|---|---|---|---|---|
+| Forward Mobile (Vulkan) | 71 | 6082 | 158 (2.6 %) | 549, some are false positives |
+| Forward Mobile (Vulkan), 30 fps cap | 30 | 2695 | 0 | 1 |
+| Compatibility (OpenGL ES 3.2) | 40 | 3723 | 0 | 0 |
 
-A recording turns on GPU composition, so the last row is an eye test only.
+With "Disable HW overlays" off, I saw no clear glitch by eye. This case can't be recorded, because any recording
+forces GPU composition.
 
-## Workaround
+The rate depends on GPU load. The scene has 12 skinned characters, 6000 grass and 300 tree instances with a
+vertex wind shader, a DirectionalLight3D with shadows, 3D scale 2.0 and MSAA 2x. There is no fps cap: V-Sync is
+on, and the app runs at about 71 fps on the 120 Hz screen.
 
-With the Vulkan queue global priority set to HIGH (engine patch), this project shows 0 faults. The compositor then
-misses deadlines under GPU composition. See `fix/README.md`.
+## Likely cause
 
-## Count the faults
+The Vulkan queue global priority (`VK_EXT_global_priority`) changes the rate. LOW makes it much worse (11.7 % of
+frames in the game where I found this). HIGH removes it in this project (0 of 2084 frames). So the driver seems to
+lose part of a frame when the compositor's GPU work preempts the app.
 
-`tools/` needs `adb`, `scrcpy`, `ffmpeg` and Python 3 with `numpy`.
+The engine patch for that test is in [`fix/`](fix/README.md), with its cost. It is not proposed as a PR.
 
-```sh
-tools/record.sh export/vulkan.apk org.fredruss.adrenoflicker /abs/out/run1 90
-python3 tools/holes.py /abs/out/run1.mp4
-python3 tools/scan_still.py /abs/out/run1.mp4 /abs/out/run1.scan && python3 tools/tally.py /abs/out/run1.scan
-```
+## Files
 
-- `holes.py` counts frames with the clear colour in the lower half of the picture. It is the strict count.
-- `scan_still.py` and `tally.py` count frames that differ from both neighbours while the neighbours agree: small
-  (300 < n < 20000 changed pixels) and giant (n >= 20000). Wind and animation give some false positives.
+- `main.tscn`, `main.gd`, `wind.gdshader`: the scene.
+- [`tools/`](tools/README.md): scripts to record the phone screen and count glitch frames.
+- [`evidence/`](evidence/README.md): clips and frame strips from this project and from the original game.
+- [`fix/`](fix/README.md): the queue priority patch.
 
-Show a frame `F` with its neighbours:
+## AI disclosure
 
-```sh
-ffmpeg -i run1.mp4 -vf "select='between(n,F-1,F+1)',tile=3x1" -fps_mode passthrough -frames:v 1 f.png
-```
-
-## Evidence
-
-From this project, official 4.7.2, "Disable HW overlays" on. Each PNG is the fault frame between its two neighbours.
-
-- `evidence/repro_grey_holes.*`: grass and ground absent for one frame.
-- `evidence/repro_giant_mesh.*`: one skinned mesh drawn giant for one frame.
-
-From the game this was found in, on the same phone:
-
-- `evidence/big_flash_*_stock_engine.*`: giant skinned mesh. A 4.7.2 build with log lines only, no rendering change.
-- `evidence/shadow_fault_*_low_priority.*`: wrong shadow blocks. A 4.7.2 build with the Vulkan queue global
-  priority set to LOW, which makes the fault more frequent.
-
-## Earlier measurements (in the game)
-
-Same phone, a game scene with 12 skinned creatures, static camera, "Disable HW overlays" on:
-
-| Setting | Fault frames |
-|---|---|
-| 3D scale 2.0, 22 fps | 2.5 % |
-| 3D scale 1.0 / 0.5, 30 fps | 0.07 % / 0.23 % |
-| Terrain only (no skinned meshes, trees, grass) | 0 of 1783 |
-| Vulkan queue global priority LOW (`VK_EXT_global_priority`, engine change) | 11.7 % |
-| Vulkan queue global priority HIGH (engine change) | 0.2 to 0.5 % |
-
-The priority result suggests that the compositor's GPU context preempts the game in a frame, and that part of the
-preempted work is lost.
-
-## AI use
-
-An AI agent (Claude) helped in the diagnosis and wrote this project, the scripts in `tools/` and this README.
-I ran every measurement on my own phone and checked the results.
+This project, the scripts and the READMEs were written with an AI assistant (Claude). I ran all tests on my
+phone and checked the results.
 
 ## License
 
